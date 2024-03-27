@@ -17,7 +17,7 @@ PyTorch,DGL,NumPy
 from BGAN_model import BGAN
 
 # Creating an instance of the BGAN model
-model = FCbasedGCN(in_dim=..., out_dim=..., n_class=...)
+model = BGAN(in_dim=..., out_dim=..., n_class=...)
 
 ...
 
