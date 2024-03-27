@@ -34,7 +34,7 @@ class BGAN(nn.Module):
     def get_graphs(self, block):
         g = block
         self.max_neighs = 10
-#        in_edges_layer = th.zeros((len(g.dstnodes()), max_neighs), dtype=th.int64, device=block.device)
+
         in_edges = th.tensor([]).to(device)
         out_edges = th.tensor([]).to(device)
         for node in range(len(g.dstnodes())): 
@@ -58,28 +58,24 @@ class BGAN(nn.Module):
         output = self.GATLayer(graph,h)
         updatefeat = self.ReLU(th.mm(output,self.localw) + h)
         return updatefeat
-#        return output
     
     def forward(self,g,h):
         '''Local Attention: Update features layers'''
-        feats = self.LocalAttention(g,h)   # [1440, 90]  d=90
+        feats = self.LocalAttention(g,h)   
         '''Global Attention: Calculate weight layers'''
-        weight = self.GlobalAttention(g,h)   # [1440,1]
+        weight = self.GlobalAttention(g,h)  
         
         '''Classifier'''
-        updatafeat = weight * feats                                # [1440, 90]
-        with g.local_scope(): #临时修改图的特征，不会影响图中的原始特征值
+        updatafeat = weight * feats                       
+        with g.local_scope(): 
             g.ndata['h'] = updatafeat
-            # 使用平均读出计算图表示
             hg = dgl.mean_nodes(g, 'h')
         return self.classify(hg)
 
 class GATLayer(nn.Module):
     def __init__(self, in_dim, out_dim):
         super(GATLayer, self).__init__()
-        # equation (1)
         self.fc = nn.Linear(in_dim, out_dim, bias=False)
-        # equation (2)
         self.attn_fc = nn.Linear(2 * out_dim, 1, bias=False)
         self.conv = CNN()
         self.reset_parameters()
@@ -89,31 +85,21 @@ class GATLayer(nn.Module):
         gain = nn.init.calculate_gain('relu')
         nn.init.xavier_normal_(self.fc.weight, gain=gain)
         nn.init.xavier_normal_(self.attn_fc.weight, gain=gain)
-#        nn.init.xavier_normal_(self.convrow, gain=gain)
-#        nn.init.xavier_normal_(self.convcol, gain=gain)
+
     def edge_attention(self, edges):
-        # edge UDF for equation (2)
         z2 = th.cat([edges.src['z'], edges.dst['z']], dim=1)
         a = self.attn_fc(z2)
         return {'e': F.leaky_relu(a)}
     def message_func(self, edges):
-        # message UDF for equation (3) & (4)
         return {'z': edges.src['z'], 'e': edges.data['e']}
     def reduce_func(self, nodes):
-        # reduce UDF for equation (3) & (4)
-        # equation (3)
         alpha = F.softmax(nodes.mailbox['e'], dim=1)
-        # equation (4)
         h = self.conv(alpha * nodes.mailbox['z'])
-#        h = th.sum(alpha * nodes.mailbox['z'], dim=1)
         return {'h': h}
     def forward(self, g,h):
-        # equation (1)
         z = self.fc(h)
         g.ndata['z'] = z
-        # equation (2)
         g.apply_edges(self.edge_attention)
-        # equation (3) & (4)
         g.update_all(self.message_func, self.reduce_func)
         return g.ndata.pop('h')
 
@@ -123,7 +109,7 @@ class CNN(th.nn.Module):
         self.convrow = th.nn.Sequential(
             th.nn.Conv2d(in_channels=1,
                         out_channels=1,
-                        kernel_size=(2,self.in_dim)),             # [1440,1,10,90]->[1440,1,9,1]
+                        kernel_size=(2,self.in_dim)),           
             th.nn.BatchNorm2d(num_features=1),
             th.nn.ReLU(),
         )
@@ -132,7 +118,7 @@ class CNN(th.nn.Module):
                          out_channels=1,
                          kernel_size=(self.max_neighs, 1)),
             th.nn.BatchNorm2d(num_features=1),
-            th.nn.ReLU(),                                 # [1440,1,10,90]->[1440,1,1,90]
+            th.nn.ReLU(),                                
         )
     def reset_parameters(self):
         """Reinitialize learnable parameters."""
@@ -141,12 +127,12 @@ class CNN(th.nn.Module):
         nn.init.xavier_normal_(self.convcol, gain=gain)
 
     def forward(self, feats):
-        feats = feats.unsqueeze(1)              # [1440,10,90]-> [1440,1,10,90]
-        featsrow = self.convrow(feats)          # [1440,1,10,90]->[1440,1,9,1]
-        featsrow = np.squeeze(featsrow)         # [1440,1,9,1]->[1440,9]
+        feats = feats.unsqueeze(1)              
+        featsrow = self.convrow(feats)          
+        featsrow = np.squeeze(featsrow)      
 
-        featscol = self.convcol(feats)         # [1440,1,10,90]->[1440,1,1,90]
-        featscol = np.squeeze(featscol)         # [1440,1,1,90]->[1440,90]
+        featscol = self.convcol(feats)        
+        featscol = np.squeeze(featscol)      
        
-        feats = th.cat((featsrow,featscol),dim=1)      # [1440,99]
+        feats = th.cat((featsrow,featscol),dim=1)    
         return feats
